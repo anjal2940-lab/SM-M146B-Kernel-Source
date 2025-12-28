@@ -47,7 +47,7 @@ jobs:
 
     # Step 6: Upload the Compiled Kernel
     - name: Upload Compiled Kernel
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v3.1.0   # Updated version
       with:
         name: kernel-build
         path: arch/arm64/boot/
