@@ -1,6 +1,7 @@
 name: Build and Patch Android Kernel
 
 on:
+   workflow_dispatch: 
   push:
     branches:
       - main   # Run this workflow whenever a change is pushed to the `main` branch
