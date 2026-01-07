@@ -1,10 +1,10 @@
-name: Build and Patch Android Kernel
+name: Build Samsung Kernel (Magisk + SusFS)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-and-patch:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -16,50 +16,37 @@ jobs:
         sudo apt update
         sudo apt install -y git make gcc-aarch64-linux-gnu bc libssl-dev build-essential ccache flex bison curl libelf-dev
 
-    - name: Apply KernelSU
-      run: |
-        # Official setup script ensures hooks are placed in kernel/
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-
-    - name: Apply SusFS Patches
+    - name: Apply SusFS Patches (Optional)
       run: |
         git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs
-        
         # Copy core files
         cp susfs/kernel_patches/fs/susfs.c fs/
         cp susfs/kernel_patches/include/linux/susfs.h include/linux/
-        
-        # Patch KernelSU for SusFS support
-        cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-        cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch && cd ..
-
-        # IMPORTANT: Apply kernel-level SusFS patch
-        # We use -f to force and || true to keep building if minor hunks fail
+        # Apply the kernel-level SusFS patch for hiding root from apps
         patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.15.patch || \
-        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.10.patch || echo "Major patch failed"
+        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.10.patch || echo "Patching skipped"
 
     - name: Stub Missing Samsung Drivers
       run: |
-        # This fixes the "No such file or directory" error for drivers/samsung/misc
-        # We loop through known problematic Samsung directories
+        # Fixes "No rule to make target" errors for missing Samsung vendor files
         DIRS=("drivers/samsung/misc" "drivers/media/platform/exynos/camera/vendor/default")
         for dir in "${DIRS[@]}"; do
           mkdir -p $dir
           echo "obj-y :=" > $dir/Makefile
         done
 
-    - name: Compile the kernel
+    - name: Compile Kernel
       env:
         ARCH: arm64
         CROSS_COMPILE: aarch64-linux-gnu-
       run: |
         make mrproper
         make s5e8535-m14xnsxx_defconfig
-        # Use -k to continue even if non-critical errors occur
         make -j$(nproc) -k
 
-    - name: Upload Compiled Kernel
+    - name: Upload Kernel Image
       uses: actions/upload-artifact@v4
       with:
-        name: M14-Kernel-Magisk-SusFS
+        name: M14-Kernel-Clean
         path: arch/arm64/boot/Image
+
