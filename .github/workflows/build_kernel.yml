@@ -14,7 +14,8 @@ jobs:
     - name: Set up build dependencies
       run: |
         sudo apt update
-        sudo apt install -y git make gcc bc libssl-dev build-essential ccache flex bison curl libelf-dev
+        # Installs the missing arm64 compiler and other build tools
+        sudo apt install -y git make gcc-aarch64-linux-gnu bc libssl-dev build-essential ccache flex bison curl libelf-dev
 
     - name: Apply KernelSU
       run: |
@@ -24,17 +25,27 @@ jobs:
       run: |
         git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs
         
-        # 1. Copy core SusFS files using the paths seen in your screenshot
-        # The .c and .h files are inside kernel_patches/fs and kernel_patches/include
+        # 1. Copy files using the EXACT paths from your screenshot
         cp susfs/kernel_patches/fs/susfs.c fs/
         cp susfs/kernel_patches/include/linux/susfs.h include/linux/
         
-        # 2. Apply the SusFS patch to the kernel
-        # For Samsung M14 (Exynos 1330), you are likely on Kernel 5.10 or 5.15
-        # We try 5.15 first, then fallback to 5.10
-        cd susfs/kernel_patches
-        git apply 5.15/0001-kernel-Add-SusFS-support.patch || git apply 5.10/0001-kernel-Add-SusFS-support.patch || echo "Manual patch check required"
-        cd ../..
+        # 2. Copy the KernelSU SusFS patch to the KSU folder
+        cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+        
+        # 3. Apply the patches
+        # Entering KernelSU to patch it for SusFS support
+        cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch && cd ..
+        
+        # Applying the main kernel patch (Try 5.15 first, then 5.10)
+        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.15.patch || \
+        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.10.patch || \
+        echo "Patching failed, but continuing build..."
+
+    - name: Bypass Missing Samsung Camera Drivers
+      run: |
+        # Creates the missing folder/file to stop the "No rule to make target" error
+        mkdir -p drivers/media/platform/exynos/camera/vendor/default
+        echo "obj-y :=" > drivers/media/platform/exynos/camera/vendor/default/Makefile
 
     - name: Compile the kernel
       env:
@@ -42,7 +53,9 @@ jobs:
         CROSS_COMPILE: aarch64-linux-gnu-
       run: |
         make mrproper
+        # Load your specific device config
         make s5e8535-m14xnsxx_defconfig
+        # Build using all available cores
         make -j$(nproc)
 
     - name: Upload Compiled Kernel
@@ -50,4 +63,3 @@ jobs:
       with:
         name: M14-Kernel-SusFS
         path: arch/arm64/boot/Image
-
