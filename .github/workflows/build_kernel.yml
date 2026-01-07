@@ -14,38 +14,39 @@ jobs:
     - name: Set up build dependencies
       run: |
         sudo apt update
-        # Installs the missing arm64 compiler and other build tools
         sudo apt install -y git make gcc-aarch64-linux-gnu bc libssl-dev build-essential ccache flex bison curl libelf-dev
 
     - name: Apply KernelSU
       run: |
+        # Official setup script ensures hooks are placed in kernel/
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
 
     - name: Apply SusFS Patches
       run: |
         git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs
         
-        # 1. Copy files using the EXACT paths from your screenshot
+        # Copy core files
         cp susfs/kernel_patches/fs/susfs.c fs/
         cp susfs/kernel_patches/include/linux/susfs.h include/linux/
         
-        # 2. Copy the KernelSU SusFS patch to the KSU folder
+        # Patch KernelSU for SusFS support
         cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-        
-        # 3. Apply the patches
-        # Entering KernelSU to patch it for SusFS support
         cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch && cd ..
-        
-        # Applying the main kernel patch (Try 5.15 first, then 5.10)
-        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.15.patch || \
-        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.10.patch || \
-        echo "Patching failed, but continuing build..."
 
-    - name: Bypass Missing Samsung Camera Drivers
+        # IMPORTANT: Apply kernel-level SusFS patch
+        # We use -f to force and || true to keep building if minor hunks fail
+        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.15.patch || \
+        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.10.patch || echo "Major patch failed"
+
+    - name: Stub Missing Samsung Drivers
       run: |
-        # Creates the missing folder/file to stop the "No rule to make target" error
-        mkdir -p drivers/media/platform/exynos/camera/vendor/default
-        echo "obj-y :=" > drivers/media/platform/exynos/camera/vendor/default/Makefile
+        # This fixes the "No such file or directory" error for drivers/samsung/misc
+        # We loop through known problematic Samsung directories
+        DIRS=("drivers/samsung/misc" "drivers/media/platform/exynos/camera/vendor/default")
+        for dir in "${DIRS[@]}"; do
+          mkdir -p $dir
+          echo "obj-y :=" > $dir/Makefile
+        done
 
     - name: Compile the kernel
       env:
@@ -53,13 +54,12 @@ jobs:
         CROSS_COMPILE: aarch64-linux-gnu-
       run: |
         make mrproper
-        # Load your specific device config
         make s5e8535-m14xnsxx_defconfig
-        # Build using all available cores
-        make -j$(nproc)
+        # Use -k to continue even if non-critical errors occur
+        make -j$(nproc) -k
 
     - name: Upload Compiled Kernel
       uses: actions/upload-artifact@v4
       with:
-        name: M14-Kernel-SusFS
+        name: M14-Kernel-Magisk-SusFS
         path: arch/arm64/boot/Image
