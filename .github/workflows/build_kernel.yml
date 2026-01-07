@@ -1,54 +1,67 @@
 name: Build and Patch Android Kernel
 
 on:
-   workflow_dispatch: 
-  push:
-    branches:
-      - main   # Run this workflow whenever a change is pushed to the `main` branch
-  pull_request:
-    branches:
-      - main   # Also run for pull requests targeting the `main` branch
+  workflow_dispatch: # Allows manual trigger
 
 jobs:
   build-and-patch:
-    runs-on: ubuntu-latest   # Use a Linux environment for the build process
+    runs-on: ubuntu-latest
 
     steps:
-    # Step 1: Checkout Repository
     - name: Checkout Kernel Source
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    # Step 2: Set Up Dependencies
     - name: Set up build dependencies
       run: |
         sudo apt update
-        sudo apt install -y git make gcc bc libssl-dev build-essential ccache flex bison curl ncurses-dev xz-utils
+        sudo apt install -y git make bc libssl-dev build-essential ccache flex bison curl libelf-dev
 
-    # Step 3: Fetch KernelSU and Apply Patch
-    - name: Apply KernelSU Patch
+    - name: Fetch AOSP Clang
       run: |
-        git clone https://github.com/KernelSU/KernelSU.git ksu
-        bash ksu/ksu.sh apply   # Automatically patches your kernel source
+        mkdir clang
+        cd clang
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
+        tar -xf clang-r487747c.tar.gz
+        echo "$(pwd)/bin" >> $GITHUB_PATH
 
-    # Step 4: Fetch SuSFs and Apply Patch
-    - name: Apply SuSFs Patch
+    - name: Apply KernelSU
       run: |
-        git clone https://github.com/example-user/SuSFs.git susfs
-        cp -r susfs/* .
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+        # Note: setup.sh is the modern way to integrate KernelSU into source
 
-    # Step 5: Compile the Kernel
+    - name: Apply SusFS Patch
+      run: |
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs
+        # Copying files to kernel source
+        cp susfs/kernel/fs/susfs.c fs/
+        cp susfs/kernel/include/linux/susfs.h include/linux/
+        # Note: Manual patching of kernel files (vfs, open.c, etc) is usually required for SusFS
+        # If your source isn't pre-patched, this step may need specific 'git apply' commands.
+
     - name: Compile the kernel
-      env:
-        ARCH: arm64
-        CROSS_COMPILE: aarch64-linux-android-
       run: |
-        make mrproper      # Clean the build environment
-        make defconfig     # Load the default device config
-        make -j$(nproc)    # Build the kernel using all available cores
+        export ARCH=arm64
+        export LLVM=1
+        export LLVM_IAS=1
+        
+        # Making the config for M14
+        make O=out s5e8535-m14xnsxx_defconfig
+        
+        # Building the Image
+        make -j$(nproc --all) O=out \
+          CC=clang \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip
 
-    # Step 6: Upload the Compiled Kernel
     - name: Upload Compiled Kernel
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: kernel-build
-        path: arch/arm64/boot/
+        name: M14-Kernel-KSU-SusFS
+        path: out/arch/arm64/boot/Image
+
