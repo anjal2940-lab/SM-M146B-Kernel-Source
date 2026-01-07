@@ -24,25 +24,24 @@ jobs:
       run: |
         git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs
         
-        # 1. Copy the core SusFS files to your kernel source
-        # Note: We use 'find' to ensure we get the right files regardless of folder depth
-        cp susfs/kernel/fs/susfs.c fs/ || cp susfs/fs/susfs.c fs/
-        cp susfs/kernel/include/linux/susfs.h include/linux/ || cp susfs/include/linux/susfs.h include/linux/
+        # 1. Copy core SusFS files using the paths seen in your screenshot
+        # The .c and .h files are inside kernel_patches/fs and kernel_patches/include
+        cp susfs/kernel_patches/fs/susfs.c fs/
+        cp susfs/kernel_patches/include/linux/susfs.h include/linux/
         
-        # 2. Apply the patches to the Kernel Hooks (This is the critical step)
-        # We assume your kernel is 5.x or 6.x based on the M14 hardware
-        # You may need to change the patch name if your kernel version is different
-        git apply susfs/kernel/patches/5.15/0001-kernel-Add-SusFS-support.patch || echo "Patch failed, checking for version 5.10"
-        git apply susfs/kernel/patches/5.10/0001-kernel-Add-SusFS-support.patch || echo "Manual patching required"
+        # 2. Apply the SusFS patch to the kernel
+        # For Samsung M14 (Exynos 1330), you are likely on Kernel 5.10 or 5.15
+        # We try 5.15 first, then fallback to 5.10
+        cd susfs/kernel_patches
+        git apply 5.15/0001-kernel-Add-SusFS-support.patch || git apply 5.10/0001-kernel-Add-SusFS-support.patch || echo "Manual patch check required"
+        cd ../..
 
     - name: Compile the kernel
       env:
         ARCH: arm64
-        # Using a more standard toolchain path for Ubuntu runners
         CROSS_COMPILE: aarch64-linux-gnu-
       run: |
         make mrproper
-        # Your specific Samsung M14 config
         make s5e8535-m14xnsxx_defconfig
         make -j$(nproc)
 
@@ -51,3 +50,4 @@ jobs:
       with:
         name: M14-Kernel-SusFS
         path: arch/arm64/boot/Image
+
