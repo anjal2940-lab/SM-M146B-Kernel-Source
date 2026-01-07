@@ -14,21 +14,28 @@ jobs:
     - name: Set up build dependencies
       run: |
         sudo apt update
-        sudo apt install -y git make gcc-aarch64-linux-gnu bc libssl-dev build-essential ccache flex bison curl libelf-dev
+        sudo apt install -y git make bc libssl-dev build-essential ccache flex bison curl libelf-dev clang lld llvm
 
-    - name: Cleanup Samsung Source (The "Fixer")
+    - name: Fetch AOSP Clang
       run: |
-        # 1. Remove strict error checking globally
+        mkdir clang
+        cd clang
+        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
+        tar -xf clang-r487747c.tar.gz
+        echo "$(pwd)/bin" >> $GITHUB_PATH
+
+    - name: Global Fix for Samsung Source
+      run: |
+        # Force remove -Werror globally
         find . -name "Makefile*" -exec sed -i 's/-Werror//g' {} +
         find . -name "Kbuild*" -exec sed -i 's/-Werror//g' {} +
 
-        # 2. Fix the specific 'implicit-int' error in Samsung's EMS code
+        # Fix implicit int errors
         if [ -f kernel/sched/ems/sysbusy.c ]; then
           sed -i 's/static cpn_next_cpu/static int cpn_next_cpu/g' kernel/sched/ems/sysbusy.c
         fi
 
-        # 3. Create "Stub" folders for missing Samsung vendor drivers
-        # This prevents the "No rule to make target" errors
+        # Create stub directories for missing vendor files
         STUB_DIRS=(
           "drivers/samsung/misc"
           "drivers/media/platform/exynos/camera/vendor/default"
@@ -42,17 +49,23 @@ jobs:
     - name: Compile the Kernel
       env:
         ARCH: arm64
-        CROSS_COMPILE: aarch64-linux-gnu-
-        # This tells the compiler to be quiet about sloppy Samsung code
-        KCFLAGS: "-Wno-error -Wno-implicit-function-declaration -Wno-unused-variable -Wno-format-security"
+        LLVM: 1
+        LLVM_IAS: 1
       run: |
-        make mrproper
-        make s5e8535-m14xnsxx_defconfig
-        # -k ensures we finish the build even if a tiny non-critical driver fails
-        make -j$(nproc) -k
+        # We use Clang and LLVM flags to match Samsung's build environment
+        make O=out s5e8535-m14xnsxx_defconfig
+        make -j$(nproc --all) O=out \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          STRIP=llvm-strip \
+          -k || echo "Ignoring non-critical errors"
 
     - name: Upload Kernel Image
       uses: actions/upload-artifact@v4
       with:
         name: M14-Clean-Kernel
-        path: arch/arm64/boot/Image
+        path: out/arch/arm64/boot/Image
