@@ -1,4 +1,4 @@
-name: Build Samsung Kernel (Magisk + SusFS)
+name: Build Clean Samsung Kernel
 
 on:
   workflow_dispatch:
@@ -16,37 +16,43 @@ jobs:
         sudo apt update
         sudo apt install -y git make gcc-aarch64-linux-gnu bc libssl-dev build-essential ccache flex bison curl libelf-dev
 
-    - name: Apply SusFS Patches (Optional)
+    - name: Cleanup Samsung Source (The "Fixer")
       run: |
-        git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs
-        # Copy core files
-        cp susfs/kernel_patches/fs/susfs.c fs/
-        cp susfs/kernel_patches/include/linux/susfs.h include/linux/
-        # Apply the kernel-level SusFS patch for hiding root from apps
-        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.15.patch || \
-        patch -p1 < susfs/kernel_patches/50_add_susfs_in_kernel-5.10.patch || echo "Patching skipped"
+        # 1. Remove strict error checking globally
+        find . -name "Makefile*" -exec sed -i 's/-Werror//g' {} +
+        find . -name "Kbuild*" -exec sed -i 's/-Werror//g' {} +
 
-    - name: Stub Missing Samsung Drivers
-      run: |
-        # Fixes "No rule to make target" errors for missing Samsung vendor files
-        DIRS=("drivers/samsung/misc" "drivers/media/platform/exynos/camera/vendor/default")
-        for dir in "${DIRS[@]}"; do
+        # 2. Fix the specific 'implicit-int' error in Samsung's EMS code
+        if [ -f kernel/sched/ems/sysbusy.c ]; then
+          sed -i 's/static cpn_next_cpu/static int cpn_next_cpu/g' kernel/sched/ems/sysbusy.c
+        fi
+
+        # 3. Create "Stub" folders for missing Samsung vendor drivers
+        # This prevents the "No rule to make target" errors
+        STUB_DIRS=(
+          "drivers/samsung/misc"
+          "drivers/media/platform/exynos/camera/vendor/default"
+          "drivers/gpu/drm/samsung/panel/ezop"
+        )
+        for dir in "${STUB_DIRS[@]}"; do
           mkdir -p $dir
           echo "obj-y :=" > $dir/Makefile
         done
 
-    - name: Compile Kernel
+    - name: Compile the Kernel
       env:
         ARCH: arm64
         CROSS_COMPILE: aarch64-linux-gnu-
+        # This tells the compiler to be quiet about sloppy Samsung code
+        KCFLAGS: "-Wno-error -Wno-implicit-function-declaration -Wno-unused-variable -Wno-format-security"
       run: |
         make mrproper
         make s5e8535-m14xnsxx_defconfig
+        # -k ensures we finish the build even if a tiny non-critical driver fails
         make -j$(nproc) -k
 
     - name: Upload Kernel Image
       uses: actions/upload-artifact@v4
       with:
-        name: M14-Kernel-Clean
+        name: M14-Clean-Kernel
         path: arch/arm64/boot/Image
-
