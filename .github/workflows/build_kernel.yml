@@ -8,12 +8,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Kernel Source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Upgraded to v4
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev libmpc-dev libmpfr-dev libgmp-dev
 
       - name: Download Google Clang (r450784d)
         run: |
@@ -46,13 +46,13 @@ jobs:
                       STRIP=llvm-strip
 
       - name: Upload Kernel Image
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Upgraded to v4
         with:
-          name: Image.gz
+          name: Kernel-Image
           path: out/arch/arm64/boot/Image.gz
 
       - name: Upload DTBO (If exists)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Upgraded to v4
         with:
-          name: dtbo.img
+          name: dtbo-image
           path: out/arch/arm64/boot/dtbo.img
