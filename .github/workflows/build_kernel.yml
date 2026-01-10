@@ -1,4 +1,4 @@
-name: Build Clean Samsung Kernel
+name: Build M14x Kernel
 
 on:
   workflow_dispatch:
@@ -6,66 +6,53 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout Kernel Source
-      uses: actions/checkout@v4
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v3
 
-    - name: Set up build dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git make bc libssl-dev build-essential ccache flex bison curl libelf-dev clang lld llvm
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
 
-    - name: Fetch AOSP Clang
-      run: |
-        mkdir clang
-        cd clang
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
-        tar -xf clang-r487747c.tar.gz
-        echo "$(pwd)/bin" >> $GITHUB_PATH
+      - name: Download Google Clang (r450784d)
+        run: |
+          mkdir clang
+          cd clang
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784d.tar.gz
+          tar -xf clang-r450784d.tar.gz
+          echo "$(pwd)/bin" >> $GITHUB_PATH
 
-    - name: Global Fix for Samsung Source
-      run: |
-        # Force remove -Werror globally
-        find . -name "Makefile*" -exec sed -i 's/-Werror//g' {} +
-        find . -name "Kbuild*" -exec sed -i 's/-Werror//g' {} +
+      - name: Build Kernel
+        run: |
+          export PATH=$(pwd)/clang/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          
+          # Clean and Config
+          make O=out s5e8535-m14xnsxx_defconfig
+          
+          # Compile
+          make -j$(nproc --all) O=out \
+                      CC=clang \
+                      LD=ld.lld \
+                      AR=llvm-ar \
+                      NM=llvm-nm \
+                      OBJCOPY=llvm-objcopy \
+                      OBJDUMP=llvm-objdump \
+                      STRIP=llvm-strip
 
-        # Fix implicit int errors
-        if [ -f kernel/sched/ems/sysbusy.c ]; then
-          sed -i 's/static cpn_next_cpu/static int cpn_next_cpu/g' kernel/sched/ems/sysbusy.c
-        fi
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v3
+        with:
+          name: Image.gz
+          path: out/arch/arm64/boot/Image.gz
 
-        # Create stub directories for missing vendor files
-        STUB_DIRS=(
-          "drivers/samsung/misc"
-          "drivers/media/platform/exynos/camera/vendor/default"
-          "drivers/gpu/drm/samsung/panel/ezop"
-        )
-        for dir in "${STUB_DIRS[@]}"; do
-          mkdir -p $dir
-          echo "obj-y :=" > $dir/Makefile
-        done
-
-    - name: Compile the Kernel
-      env:
-        ARCH: arm64
-        LLVM: 1
-        LLVM_IAS: 1
-      run: |
-        # We use Clang and LLVM flags to match Samsung's build environment
-        make O=out s5e8535-m14xnsxx_defconfig
-        make -j$(nproc --all) O=out \
-          CC=clang \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld \
-          AR=llvm-ar \
-          NM=llvm-nm \
-          STRIP=llvm-strip \
-          -k || echo "Ignoring non-critical errors"
-
-    - name: Upload Kernel Image
-      uses: actions/upload-artifact@v4
-      with:
-        name: M14-Clean-Kernel
-        path: out/arch/arm64/boot/Image
+      - name: Upload DTBO (If exists)
+        uses: actions/upload-artifact@v3
+        with:
+          name: dtbo.img
+          path: out/arch/arm64/boot/dtbo.img
