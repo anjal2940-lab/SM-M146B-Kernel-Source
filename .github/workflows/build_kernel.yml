@@ -13,9 +13,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev libmpc-dev libmpfr-dev libgmp-dev python3 python-is-python3 curl
-          # Added the missing cross-compilers
-          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm libncurses-dev libmpc-dev libmpfr-dev libgmp-dev python3 python-is-python3 curl gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi zip
 
       - name: Download Google Clang (r450784d)
         run: |
@@ -31,10 +29,9 @@ jobs:
           export SUBARCH=arm64
           
           # Clean and Config
-          # We pass CROSS_COMPILE here so the config step knows which toolchain to check
           make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- s5e8535-m14xnsxx_defconfig
           
-          # Compile
+          # Compile and capture logs
           make -j$(nproc --all) O=out \
                       ARCH=arm64 \
                       CC=clang \
@@ -46,16 +43,26 @@ jobs:
                       NM=llvm-nm \
                       OBJCOPY=llvm-objcopy \
                       OBJDUMP=llvm-objdump \
-                      STRIP=llvm-strip
+                      STRIP=llvm-strip 2>&1 | tee build.log
 
-      - name: Upload Kernel Image
+      - name: Upload Build Log on Failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Image-M14x
-          path: out/arch/arm64/boot/Image.gz
+          name: build-failure-log
+          path: build.log
 
-      - name: Upload DTBO
+      - name: Package AnyKernel3
+        if: success()
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git
+          cp out/arch/arm64/boot/Image.gz AnyKernel3/
+          cp out/arch/arm64/boot/dtbo.img AnyKernel3/ 2>/dev/null || echo "No DTBO"
+          cd AnyKernel3 && zip -r9 ../M14x-Kernel-Flashable.zip *
+
+      - name: Upload Flashable Zip
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: DTBO-Image-M14x
-          path: out/arch/arm64/boot/dtbo.img
+          name: M14x-Flashable-Kernel
+          path: M14x-Kernel-Flashable.zip
